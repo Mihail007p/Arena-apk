@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="app_background">#0B0D14</color>
+    <color name="surface">#11141F</color>
+    <color name="card">#171B28</color>
+    <color name="chip">#1B2030</color>
+    <color name="border">#262C3E</color>
+    <color name="text_primary">#F2F3FA</color>
+    <color name="text_muted">#8B90A6</color>
+    <color name="accent">#7C6CFF</color>
+    <color name="accent_soft">#A99BFF</color>
+</resources>

@@ -1,0 +1,33 @@
+# ---------- build output ----------
+build/
+Arena.apk
+Arena.apk.sha256.txt
+Arena-install.zip
+Arena-download.html
+Arena-all-files.zip
+*.idsig
+
+# ---------- signing keys: NEVER COMMIT ----------
+arena-release.jks
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.pem
+
+# ---------- Python ----------
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# ---------- editors / OS ----------
+.idea/
+.vscode/
+.DS_Store
+*.swp
+
+# ---------- local previews ----------
+*.log
+.env
