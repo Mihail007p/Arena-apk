@@ -1,0 +1,24 @@
+name: Publish Arena 2.1
+on:
+  push:
+    branches: [arena/04d58550-arena-apk]
+permissions:
+  contents: write
+jobs:
+  release:
+    if: github.event.head_commit.message == 'Publish Arena 2.1 release'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Retrieve and verify APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh api "repos/$GH_REPO/git/blobs/a5410cf9fd87e4b7b97f0e51febb7ff5e882ace0" --jq .content | base64 --decode > Arena.apk
+          echo 'cad339a41ee1ed633d6f218ce68978f3eff9b2061cdc4a421faa5502dccea6ab  Arena.apk' | sha256sum -c
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release create v2.1 Arena.apk --target "$GITHUB_SHA" --title 'Arena 2.1' --notes 'Поддержка скачивания файлов. Версия подписана новым ключом: перед установкой потребуется удалить старое приложение. На устройстве скачивание ещё не проверено.'
