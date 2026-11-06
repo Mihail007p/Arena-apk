@@ -6,7 +6,6 @@ permissions:
   contents: write
 jobs:
   release:
-    if: github.event.head_commit.message == 'Publish Arena 2.1 release'
     runs-on: ubuntu-latest
     steps:
       - name: Retrieve and verify APK
@@ -21,4 +20,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
+          if gh release view v2.1 >/dev/null 2>&1; then exit 0; fi
           gh release create v2.1 Arena.apk --target "$GITHUB_SHA" --title 'Arena 2.1' --notes 'Поддержка скачивания файлов. Версия подписана новым ключом: перед установкой потребуется удалить старое приложение. На устройстве скачивание ещё не проверено.'
