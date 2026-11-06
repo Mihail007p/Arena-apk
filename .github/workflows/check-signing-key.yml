@@ -13,7 +13,8 @@ jobs:
           KEY_PASSWORD: ${{ secrets.ARENA_KEYSTORE_PASSWORD }}
         run: |
           set -eu
-          test -n "$KEY_DATA" && test -n "$KEY_PASSWORD" || { echo '::error::Signing secrets are missing or unavailable'; exit 1; }
+          test -n "$KEY_DATA" || { echo '::error::ARENA_KEYSTORE_BASE64 missing or unavailable'; exit 1; }
+          test -n "$KEY_PASSWORD" || { echo '::error::ARENA_KEYSTORE_PASSWORD missing or unavailable'; exit 1; }
           keyfile="$(mktemp)"
           trap 'rm -f "$keyfile"' EXIT
           printf '%s' "$KEY_DATA" | base64 --decode > "$keyfile" || { echo '::error::Key is not valid Base64'; exit 1; }
