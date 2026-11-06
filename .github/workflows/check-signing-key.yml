@@ -13,11 +13,11 @@ jobs:
           KEY_PASSWORD: ${{ secrets.ARENA_KEYSTORE_PASSWORD }}
         run: |
           set -eu
-          test -n "$KEY_DATA" && test -n "$KEY_PASSWORD" || { echo 'Signing secrets are missing'; exit 1; }
+          test -n "$KEY_DATA" && test -n "$KEY_PASSWORD" || { echo '::error::Signing secrets are missing or unavailable'; exit 1; }
           keyfile="$(mktemp)"
           trap 'rm -f "$keyfile"' EXIT
-          printf '%s' "$KEY_DATA" | base64 --decode > "$keyfile"
-          keytool -list -v -keystore "$keyfile" -storepass:env KEY_PASSWORD -alias arena > "$RUNNER_TEMP/arena-cert.txt" 2>/dev/null || { echo 'Could not open signing key'; exit 1; }
-          grep -qi '52:C8:EE:4C:F3:EC:7A:85:F6:46:37:99:13:DE:19:C0:8A:23:E0:F5:87:33:1F:A7:EA:82:58:45:5E:ED:0A:10' "$RUNNER_TEMP/arena-cert.txt" || { echo 'Signing certificate does not match Arena 2.1'; exit 1; }
+          printf '%s' "$KEY_DATA" | base64 --decode > "$keyfile" || { echo '::error::Key is not valid Base64'; exit 1; }
+          keytool -list -v -keystore "$keyfile" -storepass:env KEY_PASSWORD -alias arena > "$RUNNER_TEMP/arena-cert.txt" 2>/dev/null || { echo '::error::Could not open signing key: password or key is incorrect'; exit 1; }
+          grep -qi '52:C8:EE:4C:F3:EC:7A:85:F6:46:37:99:13:DE:19:C0:8A:23:E0:F5:87:33:1F:A7:EA:82:58:45:5E:ED:0A:10' "$RUNNER_TEMP/arena-cert.txt" || { echo '::error::Signing certificate does not match Arena 2.1'; exit 1; }
           rm -f "$RUNNER_TEMP/arena-cert.txt"
           echo 'Signing key verified'
