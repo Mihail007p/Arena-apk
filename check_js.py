@@ -15,6 +15,7 @@ HERE = pathlib.Path(__file__).resolve().parent
 SOURCE = HERE / "src/ai/arena/app/MainActivity.java"
 NAMES = [
     "DARK_JS",
+    "DOWNLOAD_JS",
 ]
 
 source = SOURCE.read_text(encoding="utf-8")

@@ -2,6 +2,7 @@ package ai.arena.app;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.DownloadManager;
 import android.app.AlertDialog;
 import android.content.ActivityNotFoundException;
 import android.content.Context;
@@ -18,13 +19,17 @@ import android.net.NetworkInfo;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Environment;
 import android.provider.Settings;
 import android.util.TypedValue;
+import android.util.Base64;
 import android.view.Gravity;
 import android.view.View;
 import android.webkit.CookieManager;
 import android.webkit.DownloadListener;
 import android.webkit.GeolocationPermissions;
+import android.webkit.JavascriptInterface;
+import android.webkit.URLUtil;
 import android.webkit.PermissionRequest;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
@@ -39,6 +44,9 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import java.util.ArrayList;
+import java.util.UUID;
+import java.io.OutputStream;
+import org.json.JSONObject;
 
 /**
  * Arena 1.2 — full-screen dark WebView launcher for https://arena.ai/
@@ -50,6 +58,8 @@ public class MainActivity extends Activity {
     private static final String START_URL = "https://arena.ai/";
     private static final int REQ_FILE_CHOOSER = 1001;
     private static final int REQ_PERMISSIONS = 1002;
+    private static final int REQ_SAVE_DOWNLOAD = 1003;
+    private static final int MAX_DOWNLOAD_BYTES = 16 * 1024 * 1024;
 
     // Dark palette
     private static final int BG = 0xFF0B0D14;
@@ -92,6 +102,24 @@ public class MainActivity extends Activity {
             "}" +
             "}catch(e){}" +
             "})()";
+
+    // Placeholders are replaced with JSON-quoted values before execution.
+    private static final String DOWNLOAD_JS =
+            "(function(){" +
+            "var url=__URL__,token=__TOKEN__;" +
+            "fetch(url).then(function(r){if(!r.ok)throw new Error();return r.blob();})" +
+            ".then(function(b){if(b.size>16777216)throw new Error();" +
+            "var reader=new FileReader();" +
+            "reader.onload=function(){window.ArenaDownload.complete(token,reader.result);};" +
+            "reader.onerror=function(){window.ArenaDownload.fail(token);};" +
+            "reader.readAsDataURL(b);})" +
+            ".catch(function(){window.ArenaDownload.fail(token);});" +
+            "})()";
+
+    private String downloadToken;
+    private String downloadName;
+    private String downloadMime;
+    private byte[] downloadBytes;
 
     private FrameLayout root;
     private WebView web;
@@ -303,13 +331,14 @@ public class MainActivity extends Activity {
             cookies.setAcceptThirdPartyCookies(web, true);
         }
 
+        web.addJavascriptInterface(new DownloadBridge(), "ArenaDownload");
         web.setWebViewClient(new ArenaWebViewClient());
         web.setWebChromeClient(new ArenaChromeClient());
         web.setDownloadListener(new DownloadListener() {
             @Override
             public void onDownloadStart(String url, String userAgent, String contentDisposition,
                                         String mimeType, long contentLength) {
-                openExternally(url);
+                startDownload(url, userAgent, contentDisposition, mimeType);
             }
         });
 
@@ -317,6 +346,84 @@ public class MainActivity extends Activity {
         root.addView(web);
         root.addView(offlineView);
         offlineView.setVisibility(View.GONE);
+    }
+
+    private void startDownload(String url, String userAgent, String disposition, String mime) {
+        Uri uri = Uri.parse(url);
+        String scheme = uri.getScheme();
+        String filename = URLUtil.guessFileName(url, disposition, mime);
+        if ("blob".equalsIgnoreCase(scheme) || "data".equalsIgnoreCase(scheme)) {
+            Uri page = Uri.parse(web.getUrl() == null ? "" : web.getUrl());
+            String host = page.getHost();
+            if (!"https".equalsIgnoreCase(page.getScheme()) || host == null ||
+                    !(host.equalsIgnoreCase("arena.ai") || host.toLowerCase(java.util.Locale.US).endsWith(".arena.ai"))) {
+                Toast.makeText(this, "Скачивание с этой страницы запрещено", Toast.LENGTH_LONG).show();
+                return;
+            }
+            if (downloadToken != null || downloadBytes != null) {
+                Toast.makeText(this, "Дождитесь завершения предыдущей загрузки", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            downloadToken = UUID.randomUUID().toString();
+            downloadName = filename;
+            downloadMime = mime;
+            String script = DOWNLOAD_JS.replace("__URL__", JSONObject.quote(url))
+                    .replace("__TOKEN__", JSONObject.quote(downloadToken));
+            web.evaluateJavascript(script, null);
+        } else if ("https".equalsIgnoreCase(scheme) || "http".equalsIgnoreCase(scheme)) {
+            try {
+                DownloadManager.Request request = new DownloadManager.Request(uri);
+                request.setTitle(filename);
+                request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
+                request.addRequestHeader("User-Agent", userAgent);
+                String cookies = CookieManager.getInstance().getCookie(url);
+                if (cookies != null && !cookies.isEmpty()) request.addRequestHeader("Cookie", cookies);
+                if (mime != null && !mime.isEmpty()) request.setMimeType(mime);
+                if (Build.VERSION.SDK_INT >= 29) {
+                    request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, filename);
+                }
+                ((DownloadManager) getSystemService(DOWNLOAD_SERVICE)).enqueue(request);
+                Toast.makeText(this, "Загрузка началась", Toast.LENGTH_SHORT).show();
+            } catch (Exception e) {
+                Toast.makeText(this, "Не удалось начать загрузку", Toast.LENGTH_LONG).show();
+            }
+        } else {
+            Toast.makeText(this, "Этот тип ссылки не поддерживается", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private class DownloadBridge {
+        @JavascriptInterface
+        public void complete(String token, String dataUrl) {
+            runOnUiThread(new Runnable() { public void run() {
+                if (downloadToken == null || !downloadToken.equals(token)) return;
+                downloadToken = null;
+                try {
+                    int comma = dataUrl.indexOf(',');
+                    if (comma < 0 || !dataUrl.substring(0, comma).endsWith(";base64") ||
+                            dataUrl.length() - comma - 1 > ((MAX_DOWNLOAD_BYTES + 2L) / 3L) * 4L + 4L)
+                        throw new IllegalArgumentException();
+                    downloadBytes = Base64.decode(dataUrl.substring(comma + 1), Base64.DEFAULT);
+                    if (downloadBytes.length > MAX_DOWNLOAD_BYTES) throw new IllegalArgumentException();
+                    Intent save = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+                    save.addCategory(Intent.CATEGORY_OPENABLE);
+                    save.setType(downloadMime == null || downloadMime.isEmpty() ? "application/octet-stream" : downloadMime);
+                    save.putExtra(Intent.EXTRA_TITLE, downloadName);
+                    startActivityForResult(save, REQ_SAVE_DOWNLOAD);
+                } catch (Exception e) {
+                    downloadBytes = null;
+                    Toast.makeText(MainActivity.this, "Не удалось подготовить файл к сохранению", Toast.LENGTH_LONG).show();
+                }
+            }});
+        }
+        @JavascriptInterface
+        public void fail(String token) {
+            runOnUiThread(new Runnable() { public void run() {
+                if (downloadToken == null || !downloadToken.equals(token)) return;
+                downloadToken = null;
+                Toast.makeText(MainActivity.this, "Не удалось скачать файл (максимум 16 МБ)", Toast.LENGTH_LONG).show();
+            }});
+        }
     }
 
     private void applyDarkTheme() {
@@ -437,7 +544,7 @@ public class MainActivity extends Activity {
     private void showAbout() {
         new AlertDialog.Builder(this)
                 .setTitle("Arena")
-                .setMessage("Версия 2.0\nПакет: ai.arena.app\nСайт: arena.ai\n\n"
+                .setMessage("Версия 2.1\nПакет: ai.arena.app\nСайт: arena.ai\n\n"
                         + "Полноэкранная обёртка WebView с тёмной темой сайта. "
                         + "Сборка подписана своим ключом и не распространяется через Play Market.")
                 .setPositiveButton("ОК", null)
@@ -473,6 +580,7 @@ public class MainActivity extends Activity {
         public void onPageStarted(WebView view, String url, Bitmap favicon) {
             pageFailed = false;
             darkAppliedForPage = false;
+            downloadToken = null;
             hideOffline();
         }
 
@@ -568,6 +676,24 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        if (requestCode == REQ_SAVE_DOWNLOAD) {
+            final byte[] bytes = downloadBytes;
+            downloadBytes = null;
+            if (resultCode == RESULT_OK && data != null && data.getData() != null && bytes != null) {
+                final Uri destination = data.getData();
+                new Thread(new Runnable() { public void run() {
+                    boolean success = false;
+                    try (OutputStream out = getContentResolver().openOutputStream(destination)) {
+                        if (out != null) { out.write(bytes); success = true; }
+                    } catch (Exception ignored) { }
+                    final boolean saved = success;
+                    runOnUiThread(new Runnable() { public void run() {
+                        Toast.makeText(MainActivity.this, saved ? "Файл сохранён" : "Не удалось сохранить файл", Toast.LENGTH_LONG).show();
+                    }});
+                }}).start();
+            }
+            return;
+        }
         if (requestCode == REQ_FILE_CHOOSER) {
             if (filePathCallback == null) return;
             Uri[] results = null;

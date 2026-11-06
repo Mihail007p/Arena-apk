@@ -57,8 +57,8 @@ echo "[3/8] Linking APK + binary manifest (aapt2 link)"
   --auto-add-overlay \
   --min-sdk-version 23 \
   --target-sdk-version 33 \
-  --version-code 11 \
-  --version-name 2.0 \
+  --version-code 12 \
+  --version-name 2.1 \
   --java "$OUT/gen"
 
 echo "[3b/8] Validating injected JavaScript (node --check)"
